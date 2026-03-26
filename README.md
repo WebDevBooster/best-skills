@@ -10,7 +10,7 @@ At least they are the best for my own personal use.
 
 ## jj (Jujutsu)
 
-The first skill I'm adding is **[using-jj](using-jj)** for using [Jujutsu version control system](https://github.com/jj-vcs/jj).
+The first skill I'm adding is **[using-jj](using-jj)** for using [Jujutsu version control system](https://github.com/jj-vcs/jj) (=Git-compatible VCS that's better for AI coding agents).
 
 ### 5 things to keep in mind regarding jj (Jujutsu):
 1) JJ is superior to Git especially when using multiple AI coding agents that are coding in parallel. It prevents a lot of pain that Git would inevitably cause when trying to get stuff from Git worktrees back onto main.
