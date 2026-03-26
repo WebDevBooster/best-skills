@@ -1,107 +1,203 @@
 ---
 name: using-jj
-description: Use this skill for any task involving jj or Jujutsu, especially multi-agent workflows with parallel workspaces and landing selected changes onto main. Trigger when the user mentions jj, jujutsu, revsets, change IDs, bookmarks, oplog, workspaces, stale workspaces, absorb, squash, split, rebase, or parallel agent work.
+description: Workspace-first Jujutsu workflow for coding agents. Use when working in a jj repo, coordinating parallel agent work, moving changes between workspaces, landing selected work onto trunk, publishing bookmarks, or recovering from rewrites and stale workspaces.
 version_target: "0.39.x"
 ---
 
-# JJ workflow for coding agents
+# Using jj for parallel coding agents
 
-This skill assumes:
+Use this skill when the repository is using **Jujutsu (`jj`) as the primary mutating VCS interface**.
+
+This skill is opinionated. It is written for **coding agents**, not for humans exploring jj casually.
+
+Default assumptions:
 - trunk bookmark is `main`
 - default remote is `origin`
 - one agent = one `jj workspace`
-- local work should prefer `jj` commands over `git` commands
+- use `jj` for mutations, not `git`
+- prefer non-interactive commands
 
-Read `references/recipes.md` for copy-paste command sequences.
+If the repo clearly uses a different trunk bookmark, use that instead of `main`.
 
-## Hard rules
+## Quick start
 
-1. Prefer `jj workspace`, not Git worktrees.
-2. Always use non-interactive commands. Add `-m` to `jj new`, `jj desc` / `jj describe`, `jj commit`, `jj squash`, and `jj split` when applicable.
-3. Never assume a current bookmark exists. jj does not have one. Move or set bookmarks explicitly.
-4. Treat bookmarks as public names for pushing and PRs. For local coordination, prefer workspace names, change IDs and revsets.
-5. Use `@` for the current working-copy commit. After `jj commit -m "..."`, the finished work is usually `@-` and the new `@` is a fresh working-copy commit.
-6. When importing another agent's work and you want to keep their original intact, use `jj duplicate`. Do not use `jj squash --from other@-` unless you intentionally want to consume or rewrite the original change.
-7. If another workspace rewrote your current change and commands complain that the working copy is stale, run `jj workspace update-stale`.
-8. Prefer `jj absorb` for fixups across a stack. Prefer `jj squash` for deliberate movement of a whole change.
-9. Keep stacks shallow. Squash or abandon junk early.
-10. If a rewrite goes wrong, recover with `jj undo`. If the repo is badly wrong, inspect `jj op log` and use `jj op restore <operation-id>`.
+```bash
+# 1) Sync remote state
+jj git fetch
 
-## Mental model
+# 2) Create a dedicated workspace for this agent
+jj workspace add ../repo-agent-<name> --name agent-<name> -r main@origin -m "agent-<name>: start from main"
 
-- `@` is the current working-copy commit.
-- `@-` is the parent of the current working-copy commit.
-- `<workspace>@` is another workspace's current working-copy commit.
-- `<workspace>@-` is usually that workspace's most recently committed change.
-- Change IDs stay stable across rewrites. Commit IDs do not.
-- Conflicts are state, not emergencies. jj stores them in commits and lets you resolve them later.
+# 3) Enter the workspace and inspect state
+cd ../repo-agent-<name>
+jj status
+jj log -r 'main@origin | main | @ | @- | bookmarks()'
 
-## Default workflow for agent work
+# 4) Start the change by describing it
+jj describe -m "feat: implement <task>"
 
-### 1) Start or refresh an agent workspace
-From an existing workspace in the repo:
+# 5) Edit files, then commit non-interactively
+jj commit -m "feat: implement <task>"
+
+# 6) Publish quickly if asked
+jj git push --change @-
+```
+
+## Non-negotiable rules
+
+1. Treat `jj workspace` as the unit of parallel agent work.
+2. Use `jj` for mutations. Do not mix mutating `git` commands into a jj workflow unless the user explicitly asks for that.
+3. Never assume there is a current bookmark. jj does not have one.
+4. Use **descriptions first**. In normal agent work, start by naming the change with `jj describe -m ...`.
+5. Prefer non-interactive commands. Add `-m` when supported.
+6. After `jj commit -m ...`, the finished change is usually `@-`, not `@`.
+7. When taking work from another workspace and you want to keep the source intact, use `jj duplicate`.
+8. Use `jj squash --from ... --into ...` only when you intentionally want to adopt or consume that source change.
+9. If a workspace becomes stale, repair it with `jj workspace update-stale`.
+10. If a rewrite goes wrong, recover with `jj undo`. If needed, inspect `jj op log` and use `jj op restore`.
+
+## The mental model you must use
+
+### Think in changes, not branches
+
+jj is not centered around “the current branch”. It is centered around **changes** and a **working-copy commit**.
+
+- `@` = current workspace’s working-copy commit
+- `@-` = parent of the current working-copy commit
+- `<workspace>@` = another workspace’s working-copy commit
+- `<workspace>@-` = that workspace’s most recently committed change in the common case
+
+### Think describe-first
+
+In this skill, treat jj as a **describe-first workflow**:
+- first name the change with `jj describe -m "..."`
+- then edit files
+- then seal that state with `jj commit -m "..."`
+- after commit, continue from the fresh working-copy commit at `@`
+
+The practical shortcut is that `jj commit` without path arguments or `--interactive` is effectively `jj describe` followed by `jj new`, so change description comes first in the normal flow.
+
+### Bookmarks are explicit public names
+
+Bookmarks are for naming work that needs to be pushed, reviewed, or followed later.
+
+Do not expect bookmarks to move automatically like Git branches. Move them explicitly with:
+- `jj bookmark set ... -r ...`
+- `jj bookmark move ... --to ...`
+- `jj bookmark advance ... --to ...`
+
+### Conflicts are state, not emergencies
+
+jj can record conflicts directly in commits. That means a rebase can succeed while leaving a conflicted commit behind for later resolution.
+
+Do not panic when conflicts appear. Inspect, resolve, continue.
+
+## Standard flow for agent work
+
+### 1) Inspect first
+
+Run these before mutating anything important:
+
+```bash
+jj status
+jj log -r 'main@origin | main | @ | @- | bookmarks()'
+jj workspace list
+```
+
+### 2) Start the task in a dedicated workspace
+
+Preferred:
 
 ```bash
 jj git fetch
-jj workspace add ../repo-agent-a --name agent-a -r main@origin -m "agent-a: start from main"
+jj workspace add ../repo-agent-<name> --name agent-<name> -r main@origin -m "agent-<name>: start from main"
 ```
 
-If `main@origin` is not available locally yet, use `main` after a fetch.
-
-### 2) Do the work
-Inside the new workspace:
+Then:
 
 ```bash
-jj st
-jj desc -m "feat: implement X"
+cd ../repo-agent-<name>
+jj status
+jj describe -m "feat: <task>"
+```
+
+### 3) Implement the work
+
+```bash
 # edit files
-jj commit -m "feat: implement X"
+jj diff
+jj commit -m "feat: <task>"
 ```
 
-After `jj commit`, the change to share is usually `agent-a@-`.
+After that, the completed change is typically `@-`.
 
-### 3) Inspect other agents' work
+### 4) Reshape the work if needed
+
+Use the least destructive command that fits the job.
+
+#### Fixups across a stack
 
 ```bash
-jj log -r 'main@origin | agent-a@ | agent-b@ | agent-c@'
-jj show agent-a@-
-jj diff --from main@origin --to agent-a@-
+# edit files in the current workspace
+jj absorb
 ```
 
-### 4) Import another agent's work
+Use this when you changed files that logically belong in earlier commits.
+
+#### Move one whole change into another
+
+```bash
+jj squash --from <source> --into <destination> --use-destination-message
+```
+
+Use this when you intentionally want the destination to absorb the source.
+
+#### Split a mixed change by files
+
+```bash
+jj split path/to/file1 path/to/file2 -m "extract <part>"
+```
+
+Use this only when the split can be described by filesets and done non-interactively.
+
+#### Rebase onto fresh trunk
+
+```bash
+jj git fetch
+jj rebase -r @- -o main@origin
+```
+
+Use this when your change should be replayed onto current trunk.
+
+### 5) Take work from another workspace
 
 #### Safe copy mode
-Use this when you want to test or integrate another agent's change without rewriting their original:
+
+Use when you want another agent’s work without rewriting their source change.
 
 ```bash
 jj duplicate agent-a@- -A @
 ```
 
-You can also copy it directly after trunk:
+Or duplicate after trunk:
 
 ```bash
 jj duplicate agent-a@- -A main@origin
 ```
 
 #### Adopt mode
-Use this when you are taking ownership of the change and it is fine for the source workspace to become stale:
+
+Use when you are intentionally taking ownership of the source change.
 
 ```bash
 jj squash --from agent-a@- --into @ --use-destination-message
 ```
 
-After adopt mode, the source workspace may need `jj workspace update-stale`.
-
-### 5) Curate the result
-
-- Use `jj absorb` when you fixed several older commits from the top of a stack.
-- Use `jj squash` to move a whole change into its destination.
-- Use `jj split <filesets> -m "..."` only when the split is file-based and can be done non-interactively.
-- Avoid interactive editor flows unless the user explicitly wants them.
+Warning: this can leave the source workspace stale.
 
 ### 6) Publish
 
-Fastest route for one change:
+Fast route:
 
 ```bash
 jj git push --change @-
@@ -110,15 +206,16 @@ jj git push --change @-
 Named bookmark route:
 
 ```bash
-jj bookmark set agent/feature-x -r @-
-jj git push --bookmark agent/feature-x
+jj bookmark set agent/<task> -r @-
+jj git push --bookmark agent/<task>
 ```
 
 ### 7) Land selected work onto `main`
 
-Prefer a curated integration workspace. Make one empty integration change on top of trunk, adopt the selected agent changes into it, then commit and move `main` to the landed commit.
+Use a dedicated integration workspace.
 
 ```bash
+jj git fetch
 jj workspace add ../repo-integrate --name integrate -r main@origin -m "integrate selected agent work"
 cd ../repo-integrate
 jj squash --from agent-a@- --into @ --use-destination-message
@@ -127,43 +224,115 @@ jj commit -m "integrate selected agent work"
 jj bookmark set main -r @-
 ```
 
-Only push `main` if the user explicitly wants that:
+Push `main` only if explicitly requested:
 
 ```bash
 jj git push --bookmark main
 ```
 
-## Common mistakes to avoid
+## Commands by job
 
-- Do not use `master` in examples. Use `main` unless the repo clearly uses another trunk bookmark.
-- Do not assume `jj git push --all` will push unpublished work. It pushes bookmarks, not arbitrary revisions.
-- Do not point a bookmark at `@` right after `jj commit` unless you really want the fresh working-copy commit instead of the finished change in `@-`.
-- Do not use Git worktree commands as the main coordination mechanism in a jj repo. Use `jj workspace`.
-- Do not panic when a rebase creates conflicts. Resolve them in the affected commit and continue working.
-
-## Recommended troubleshooting sequence
+### Inspect and understand
 
 ```bash
-jj st
+jj status
 jj log -r 'main@origin | main | @ | @- | bookmarks()'
-jj op log --limit 10
+jj show @-
+jj diff
+jj evolog -r @-
+jj workspace list
+jj workspace root --name agent-a
 ```
 
-If the working copy is stale:
+### Start and name work
 
 ```bash
-jj workspace update-stale
+jj describe -m "feat: <task>"
+jj new -m "next: <task>"
+jj commit -m "feat: <task>"
 ```
 
-If the last rewrite was wrong:
+### Move and reshape work
+
+```bash
+jj absorb
+jj squash --from <source> --into <destination> --use-destination-message
+jj split <filesets> -m "extract <part>"
+jj duplicate <rev> -A @
+jj rebase -r <rev> -o main@origin
+```
+
+### Workspaces
+
+```bash
+jj workspace add ../repo-agent-a --name agent-a -r main@origin -m "agent-a: start from main"
+jj workspace list
+jj workspace root --name agent-a
+jj workspace update-stale
+jj workspace forget agent-a
+```
+
+### Bookmarks and publishing
+
+```bash
+jj bookmark set agent/<task> -r @-
+jj bookmark move main --to @-
+jj bookmark advance main --to @-
+jj git push --change @-
+jj git push --bookmark agent/<task>
+```
+
+### Recovery
 
 ```bash
 jj undo
-```
-
-If you need a previous repo state:
-
-```bash
+jj redo
 jj op log
 jj op restore <operation-id>
+jj resolve
 ```
+
+## Decision rules
+
+### Prefer `jj describe` when
+- you are starting or renaming the current change
+- you need to update the description without opening an editor
+
+### Prefer `jj commit` when
+- you want to finalize the current working-copy change and continue from a fresh working-copy commit
+
+### Prefer `jj duplicate` when
+- another workspace’s change should stay intact
+- you want a safe local copy before integration
+
+### Prefer `jj squash` when
+- you want one change to be absorbed into another
+- you are intentionally consuming the source change into the destination
+
+### Prefer `jj absorb` when
+- you made follow-up edits that logically belong to older commits
+
+### Prefer `jj bookmark set` when
+- you need to create or point a bookmark by name
+
+### Prefer `jj bookmark advance` when
+- a bookmark should follow rewritten work forward to a new target
+
+## Hard “do not do this” rules
+
+- Do not default to Git worktrees. Use jj workspaces.
+- Do not assume `main` moved just because you committed. It did not.
+- Do not point bookmarks at `@` after `jj commit` unless you really want the fresh empty working-copy commit.
+- Do not mix `git commit`, `git rebase`, `git branch -f`, or `git worktree` into a normal jj workflow.
+- Do not use `jj split` for a non-file-based split unless the user explicitly wants an interactive/editor flow.
+- Do not run `jj git push --all` as a lazy default. Push the intended bookmark or change.
+- Do not rewrite another agent’s work unless the workflow explicitly allows adopt mode.
+
+## Specific tasks
+
+- **Mental model and describe-first**: `references/mental-model.md`
+- **Workspace setup and agent coordination**: `references/workspaces.md`
+- **Landing work onto trunk**: `references/landing-on-main.md`
+- **Recovery, stale workspaces and conflicts**: `references/recovery.md`
+- **Compatibility and mixed Git/JJ warnings**: `references/compatibility-notes.md`
+- **Copy-paste recipes**: `references/recipes.md`

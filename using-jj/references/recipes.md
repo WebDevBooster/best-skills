@@ -1,84 +1,68 @@
-# jj recipes for multi-agent workflows
+# Copy-paste jj recipes for coding agents
 
-These assume:
+These recipes assume:
 - trunk bookmark is `main`
-- remote is `origin`
-- each agent has its own named workspace
+- default remote is `origin`
+- one agent = one workspace
 
-## Create an agent workspace
+## Create a new agent workspace
 
 ```bash
 jj git fetch
 jj workspace add ../repo-agent-a --name agent-a -r main@origin -m "agent-a: start from main"
+cd ../repo-agent-a
+jj status
+jj describe -m "feat: <task>"
 ```
 
-## List workspaces
+## Finish a task in the current workspace
+
+```bash
+# edit files
+jj diff
+jj commit -m "feat: <task>"
+```
+
+## Show active workspaces and agent tips
 
 ```bash
 jj workspace list
+jj log -r 'main@origin | main | agent-a@ | agent-b@ | integrate@ | @ | @-'
 ```
 
-## Show another workspace's root path
-
-```bash
-jj workspace root --name agent-a
-```
-
-## See all active agent tips and trunk
-
-```bash
-jj log -r 'main@origin | main | agent-a@ | agent-b@ | agent-c@'
-```
-
-## Inspect the committed result from another workspace
+## Inspect another workspace’s last committed change
 
 ```bash
 jj show agent-a@-
 jj diff --from main@origin --to agent-a@-
 ```
 
-## Copy another agent's work without rewriting it
+## Copy another agent’s work without rewriting it
 
 ```bash
 jj duplicate agent-a@- -A @
 ```
 
-## Adopt another agent's work into the current change
-
-This rewrites the source revision and may stale the source workspace.
+## Adopt another agent’s work into the current change
 
 ```bash
 jj squash --from agent-a@- --into @ --use-destination-message
 ```
 
-## Rebase an agent's change onto latest trunk
-
-Use only when you intend to rewrite that change.
+## Rebase current finished change onto latest trunk
 
 ```bash
 jj git fetch
-jj rebase -r agent-a@- -o main@origin
+jj rebase -r @- -o main@origin
 ```
 
-## Start an integration workspace and land selected agent work onto main
+## Split out a file-based subset
 
 ```bash
-jj git fetch
-jj workspace add ../repo-integrate --name integrate -r main@origin -m "integrate selected agent work"
-cd ../repo-integrate
-jj squash --from agent-a@- --into @ --use-destination-message
-jj squash --from agent-b@- --into @ --use-destination-message
-jj commit -m "integrate selected agent work"
-jj bookmark set main -r @-
+jj split src/new_parser.rs tests/parser_test.rs -m "extract parser"
 ```
 
-Push only if requested:
-
-```bash
-jj git push --bookmark main
-```
-
-## Publish one change quickly without naming a bookmark yourself
+## Publish the current finished change quickly
 
 ```bash
 jj git push --change @-
@@ -91,38 +75,22 @@ jj bookmark set agent/feature-x -r @-
 jj git push --bookmark agent/feature-x
 ```
 
-## Move a bookmark forward explicitly
-
-Use this when a bookmark should follow rewritten work.
+## Start an integration workspace and land selected changes
 
 ```bash
-jj bookmark advance main --to @-
+jj git fetch
+jj workspace add ../repo-integrate --name integrate -r main@origin -m "integrate selected agent work"
+cd ../repo-integrate
+jj squash --from agent-a@- --into @ --use-destination-message
+jj squash --from agent-b@- --into @ --use-destination-message
+jj commit -m "integrate selected agent work"
+jj bookmark set main -r @-
 ```
 
-## Fixups across a stack
+## Push `main` only when asked
 
 ```bash
-# edit files in the current working copy
-jj absorb
-```
-
-## File-based split, non-interactive
-
-```bash
-jj split src/new_module.rs tests/new_module_test.rs -m "extract module"
-```
-
-## Recover from a bad rewrite
-
-```bash
-jj undo
-```
-
-## Recover an older repo state
-
-```bash
-jj op log
-jj op restore <operation-id>
+jj git push --bookmark main
 ```
 
 ## Repair a stale workspace
@@ -131,9 +99,15 @@ jj op restore <operation-id>
 jj workspace update-stale
 ```
 
-## Useful quick checks
+## Undo the last bad mutation
 
 ```bash
-jj st
-jj log -r '@ | @- | main | main@origin | bookmarks()'
+jj undo
+```
+
+## Restore an older repo state
+
+```bash
+jj op log
+jj op restore <operation-id>
 ```
